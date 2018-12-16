@@ -45,4 +45,5 @@ Gem::Specification.new do |spec|
 
   spec.add_dependency 'sequel', '~> 5.15'
   spec.add_dependency 'chrono', '~> 0.4.0'
+  spec.add_dependency 'activesupport'
 end

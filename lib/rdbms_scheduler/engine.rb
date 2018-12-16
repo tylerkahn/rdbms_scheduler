@@ -1,6 +1,8 @@
 require 'sequel'
 require 'securerandom'
 require 'chrono'
+require 'active_support/time_with_zone'
+require 'active_support/core_ext/time/zones'
 
 module RdbmsScheduler
   class Engine
@@ -10,7 +12,7 @@ module RdbmsScheduler
       config ||= {}
       db_uri ||= config[:db_uri]
       @table_name = table_name || config[:table_name]
-      @column_prefix = column_prefix || config[:column_prefix]
+      @column_prefix = (column_prefix || config[:column_prefix]).to_s
 
       if db_uri.nil? || @table_name.nil?
         raise ArgumentError, "db_uri and table_name must not be nil"
@@ -35,8 +37,10 @@ module RdbmsScheduler
       })
 
       if stale_row_count > 0
-        table.where(Sequel.lit("#{col(:lease_expires_at)} <= #{now_epoch}")).where({col(:token) => token}).all.each do |row|
-          next_run_at = Chrono::NextTime.new(now: Time.now, source: row[col(:cron)]).to_time.to_i
+        table.where({col(:token) => token}).all.each do |row|
+          run_time_offset_seconds = row[col(:run_time_offset_seconds)] || 0
+          now = row[col(:time_zone)] ? Time.now.in_time_zone(row[col(:time_zone)]) : Time.now
+          next_run_at = Chrono::NextTime.new(now: now - run_time_offset_seconds, source: row[col(:cron)]).to_time.to_i + run_time_offset_seconds
           table.where(id: row[:id]).update({
             col(:next_run_at) => next_run_at,
             col(:lease_expires_at) => 0
@@ -48,6 +52,7 @@ module RdbmsScheduler
 
     def add(cron, lease_seconds = nil, **other_cols)
       now = Time.now
+      # TODO: properly calculate runtime offset here
       next_run_time = Chrono::NextTime.new(now: now, source: cron).to_time 
       interval_seconds = Chrono::NextTime.new(now: next_run_time, source: cron).to_time - next_run_time
       data = other_cols[:data] && JSON.generate(other_cols[:data])
@@ -57,7 +62,7 @@ module RdbmsScheduler
         col(:cron) => cron,
         col(:lease_seconds) => lease_seconds || (interval_seconds/2).to_i - 1,
         col(:max_stale_seconds) => interval_seconds.to_i - 1, 
-        col(:next_run_at) => next_run_time.to_i,
+        col(:next_run_at) => next_run_time.to_i + (other_cols[:run_time_offset_seconds] || 0),
         **Hash[other_cols.map {|k, v| [k.to_sym == :id ? :id : col(k), v]}],
       })
     end
@@ -90,13 +95,16 @@ module RdbmsScheduler
     end
 
     def finish!(id, token)
-      if id.is_a?(Hash) && id[:cron]
-        cron = id[:cron]
+      if id.is_a?(Hash) && id.has_key?(col(:cron)) && id.has_key?(col(:run_time_offset_seconds)) && id.has_key?(col(:time_zone))
+        cron = id[col(:cron)]
+        run_time_offset_seconds = id[col(:run_time_offset_seconds)]
+        time_zone = id[col(:time_zone)]
       else
-        cron = table.where(id: id).get(col(:cron))
+        cron, run_time_offset_seconds, time_zone = table.where(id: id).get([col(:cron), col(:run_time_offset_seconds), col(:time_zone)])
       end
-      now = Time.now
-      next_run_time = Chrono::NextTime.new(now: now, source: cron).to_time.to_i
+      run_time_offset_seconds ||= 0
+      now = time_zone ? Time.now.in_time_zone(time_zone) : Time.now
+      next_run_time = Chrono::NextTime.new(now: now - run_time_offset_seconds, source: cron).to_time.to_i + run_time_offset_seconds
       table.where(id: id, col(:token) => token)
         .where(Sequel.lit("#{now_epoch} < #{col(:lease_expires_at)}"))
         .update({
@@ -143,7 +151,9 @@ module RdbmsScheduler
         ["String", col(:token), {index: true}],
         ["Fixnum", col(:max_stale_seconds), {null: false}],
         ["Fixnum", col(:lease_expires_at), {index: true, null: false, default: 0}],
-        ["Fixnum", col(:next_run_at), {index: true, null: false}]
+        ["Fixnum", col(:next_run_at), {index: true, null: false}],
+        ["Fixnum", col(:run_time_offset_seconds)],
+        ["String", col(:time_zone)]
       ]
 
       table_name = @table_name.to_sym
