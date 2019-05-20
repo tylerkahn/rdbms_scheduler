@@ -25,6 +25,10 @@ module RdbmsScheduler
       @table = @db[table_name.to_sym]
     end
 
+    def disconnect!
+      @db.disconnect
+    end
+
     def update_stales!
       token = generate_token
       stale_row_count = table.where(
