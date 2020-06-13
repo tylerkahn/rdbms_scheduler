@@ -37,7 +37,7 @@ Gem::Specification.new do |spec|
   spec.require_paths = ["lib"]
 
   spec.add_development_dependency "bundler", "~> 1.17"
-  spec.add_development_dependency "rake", "~> 10.0"
+  spec.add_development_dependency "rake", ">= 12.3.3"
   spec.add_development_dependency "pry"
   spec.add_development_dependency "pry-doc"
   spec.add_development_dependency "sqlite3"
@@ -45,5 +45,5 @@ Gem::Specification.new do |spec|
 
   spec.add_dependency 'sequel', '~> 5.15'
   spec.add_dependency 'chrono', '~> 0.4.0'
-  spec.add_dependency 'activesupport'
+  spec.add_dependency 'activesupport', ">= 5.2.4.3"
 end
