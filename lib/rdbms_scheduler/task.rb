@@ -12,7 +12,7 @@ module RdbmsScheduler
 
     def true_next_run_at
       next_run_at = row[engine.col(:next_run_at)]
-      run_time_offset = row[engine.col(:run_time_offset)] || 0
+      run_time_offset = row[engine.col(:run_time_offset_seconds)] || 0
       next_run_at - run_time_offset
     end
 
